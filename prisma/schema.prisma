@@ -1,0 +1,82 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// 국회의원 정보
+model AssemblyMember {
+  id            Int      @id @default(autoincrement())
+  memberId      String   @unique // API의 의원 ID
+  name          String
+  engName       String?
+  party         String   // 소속 정당
+  district      String   // 선거구
+  committee     String?  // 소속 위원회
+  termNumber    Int      // 당선 대수
+  reelection    Boolean  @default(false) // 재선 여부
+  profileUrl    String?
+
+  votes         Vote[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([name])
+  @@index([party])
+}
+
+// 안건 정보
+model Bill {
+  id              Int      @id @default(autoincrement())
+  billId          String   @unique // API의 안건 ID
+  billNumber      String   // 의안번호
+  billName        String   // 안건명
+  proposer        String?  // 제안자
+  voteDate        DateTime // 표결일
+  sessionNumber   Int?     // 회차
+  isPassed        Boolean  // 가결 여부
+  favorCount      Int?     // 찬성 수
+  againstCount    Int?     // 반대 수
+  abstainCount    Int?     // 기권 수
+  absentCount     Int?     // 불참 수
+
+  votes           Vote[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([voteDate])
+  @@index([billName])
+}
+
+// 표결 내역
+model Vote {
+  id              Int            @id @default(autoincrement())
+
+  memberId        Int
+  member          AssemblyMember @relation(fields: [memberId], references: [id])
+
+  billId          Int
+  bill            Bill           @relation(fields: [billId], references: [id])
+
+  result          VoteResult     // 표결 결과
+
+  createdAt       DateTime       @default(now())
+
+  @@unique([memberId, billId])
+  @@index([memberId])
+  @@index([billId])
+  @@index([result])
+}
+
+enum VoteResult {
+  FAVOR    // 찬성
+  AGAINST  // 반대
+  ABSTAIN  // 기권
+  ABSENT   // 불참
+}
