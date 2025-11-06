@@ -2,22 +2,35 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { fetchMembers } from '@/lib/assembly-api';
 
-// 국회의원 목록 조회 (검색)
+// 국회의원 목록 조회 (검색 또는 전체 리스트)
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const name = searchParams.get('name');
     const party = searchParams.get('party');
+    const limit = parseInt(searchParams.get('limit') || '30');
 
     // 1. DB에서 먼저 검색
-    let members = await prisma.assemblyMember.findMany({
-      where: {
-        ...(name && { name: { contains: name } }),
-        ...(party && { party }),
-      },
-      take: 20,
-      orderBy: { name: 'asc' },
-    });
+    let members;
+
+    // 검색어가 없으면 랜덤, 있으면 가나다순
+    if (!name && !party) {
+      // 랜덤으로 가져오기 (PostgreSQL)
+      members = await prisma.$queryRaw<any[]>`
+        SELECT * FROM "AssemblyMember"
+        ORDER BY RANDOM()
+        LIMIT ${limit}
+      `;
+    } else {
+      members = await prisma.assemblyMember.findMany({
+        where: {
+          ...(name && { name: { contains: name } }),
+          ...(party && { party }),
+        },
+        take: limit,
+        orderBy: { name: 'asc' },
+      });
+    }
 
     // 2. DB에 없으면 외부 API 호출
     if (members.length === 0 && (name || party)) {

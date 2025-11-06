@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 interface Member {
@@ -26,6 +26,31 @@ export default function Home() {
   const [memberResults, setMemberResults] = useState<Member[]>([]);
   const [billResults, setBillResults] = useState<Bill[]>([]);
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+
+  // 초기 데이터 로드
+  useEffect(() => {
+    const loadInitialData = async () => {
+      try {
+        setInitialLoading(true);
+        if (searchType === 'member') {
+          const response = await fetch('/api/members?limit=30');
+          const data = await response.json();
+          setMemberResults(data.members || []);
+        } else {
+          const response = await fetch('/api/bills?limit=30');
+          const data = await response.json();
+          setBillResults(data.bills || []);
+        }
+      } catch (error) {
+        console.error('Failed to load initial data:', error);
+      } finally {
+        setInitialLoading(false);
+      }
+    };
+
+    loadInitialData();
+  }, [searchType]);
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
@@ -78,7 +103,10 @@ export default function Home() {
           {/* Search Type Toggle */}
           <div className="flex gap-4 mb-6">
             <button
-              onClick={() => setSearchType('member')}
+              onClick={() => {
+                setSearchType('member');
+                setSearchQuery('');
+              }}
               className={`flex-1 py-3 px-6 rounded-lg font-semibold transition-colors ${
                 searchType === 'member'
                   ? 'bg-blue-600 text-white'
@@ -88,7 +116,10 @@ export default function Home() {
               국회의원 검색
             </button>
             <button
-              onClick={() => setSearchType('bill')}
+              onClick={() => {
+                setSearchType('bill');
+                setSearchQuery('');
+              }}
               className={`flex-1 py-3 px-6 rounded-lg font-semibold transition-colors ${
                 searchType === 'bill'
                   ? 'bg-blue-600 text-white'
@@ -125,11 +156,11 @@ export default function Home() {
           </button>
         </div>
 
-        {/* Member Search Results */}
-        {memberResults.length > 0 && (
+        {/* Member Results */}
+        {searchType === 'member' && memberResults.length > 0 && (
           <div className="mt-8 max-w-3xl mx-auto">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-              검색 결과 ({memberResults.length}명)
+              {searchQuery ? `검색 결과 (${memberResults.length}명)` : `국회의원 (${memberResults.length}명)`}
             </h2>
             <div className="space-y-3">
               {memberResults.map((member) => (
@@ -159,11 +190,11 @@ export default function Home() {
           </div>
         )}
 
-        {/* Bill Search Results */}
-        {billResults.length > 0 && (
+        {/* Bill Results */}
+        {searchType === 'bill' && billResults.length > 0 && (
           <div className="mt-8 max-w-3xl mx-auto">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-              검색 결과 ({billResults.length}건)
+              {searchQuery ? `검색 결과 (${billResults.length}건)` : `최근 안건 목록 (${billResults.length}건)`}
             </h2>
             <div className="space-y-3">
               {billResults.map((bill) => (
@@ -199,7 +230,16 @@ export default function Home() {
           </div>
         )}
 
-        {memberResults.length === 0 && billResults.length === 0 && searchQuery && !loading && (
+        {/* 데이터 로딩 중 */}
+        {initialLoading && (
+          <div className="mt-8 text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-gray-600 dark:text-gray-400">데이터 로딩 중...</p>
+          </div>
+        )}
+
+        {/* 검색 결과 없음 */}
+        {!initialLoading && memberResults.length === 0 && billResults.length === 0 && searchQuery && !loading && (
           <div className="mt-8 text-center text-gray-600 dark:text-gray-400">
             검색 결과가 없습니다. 다른 검색어로 시도해보세요.
           </div>

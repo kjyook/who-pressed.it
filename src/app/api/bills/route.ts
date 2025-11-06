@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { fetchBills } from '@/lib/assembly-api';
 
-// 안건 목록 조회 (검색)
+// 안건 목록 조회 (검색 또는 전체 리스트)
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const title = searchParams.get('title');
     const billNo = searchParams.get('billNo');
     const proposer = searchParams.get('proposer');
+    const limit = parseInt(searchParams.get('limit') || '30');
 
     // 1. DB에서 먼저 검색
     let bills = await prisma.bill.findMany({
@@ -17,7 +18,7 @@ export async function GET(request: NextRequest) {
         ...(billNo && { billNumber: billNo }),
         ...(proposer && { proposer: { contains: proposer } }),
       },
-      take: 100,
+      take: limit,
       orderBy: { voteDate: 'desc' },
     });
 
