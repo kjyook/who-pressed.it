@@ -29,7 +29,7 @@
 ### 내부 API Routes
 
 - `GET /api/members?name={name}`: 의원 검색
-- `GET /api/members/[id]/votes`: 의원의 표결 내역 조회 (최대 50개 안건)
+- `GET /api/members/[id]/votes?page={page}&pageSize={size}`: 의원의 표결 내역 조회 (페이지네이션)
 - `GET /api/bills?title={title}`: 안건 검색 (제목 기반)
 - `GET /api/bills/[id]`: 안건 기본 정보 조회
 - `GET /api/bills/[id]/votes?page={page}&pageSize={size}`: 안건별 표결 결과 (페이지네이션)
@@ -41,9 +41,10 @@
 2. DB에서 먼저 조회
 3. 없으면 Open API 호출하여 의원 정보 저장
 4. 의원 상세 페이지 접속 시 표결 내역 없으면:
-   - 안건 목록 API 호출 (최근 50개)
+   - 안건 목록 API 호출 (최근 20개)
    - 각 안건의 BILL_ID로 표결 정보 조회
    - 해당 의원의 표결만 필터링하여 DB 저장
+   - 프론트엔드에서 50건씩 Infinite Scroll로 표시
 
 ### 안건 검색 플로우
 1. 사용자가 안건명으로 검색
@@ -98,7 +99,7 @@ yarn prisma studio       # DB GUI
 
 - [x] 안건 검색 기능 추가 ✅
 - [x] Infinite Scroll 구현 (50명씩 로딩, 중복 방지, 애니메이션) ✅
-- [ ] 의원 상세 페이지 Infinite Scroll 적용
+- [x] 의원 상세 페이지 Infinite Scroll 적용 ✅
 - [ ] 정당별 필터링
 - [ ] 표결 통계 차트
 - [ ] Vercel 배포
@@ -121,6 +122,15 @@ yarn prisma studio       # DB GUI
   - 새로운 아이템만 fade-in 애니메이션 적용
 - **결과**: 빠른 초기 로딩 + 부드러운 스크롤 + 중복 없음
 - **상세**: `src/docs/infinite-scroll-nightmare.md` 참고
+
+### 의원 상세 페이지 Infinite Scroll (2025-01-06)
+- 의원 표결 내역 API에 페이지네이션 추가
+- 안건별 표결과 동일한 패턴으로 구현:
+  - 의원 기본 정보와 표결 데이터 분리 로딩
+  - 50건씩 Infinite Scroll
+  - `loadedPages` Set + `isFetchingRef`로 중복 방지
+  - 새로운 아이템에만 fade-in 애니메이션
+  - 표결 카드 클릭 시 안건 상세 페이지로 이동
 
 ## 블로그 작성
 
