@@ -43,3 +43,6 @@ next-env.d.ts
 # blog
 /src/docs
 /src/generated/prisma
+
+# test API routes
+/src/app/api/test

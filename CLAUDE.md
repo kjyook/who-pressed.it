@@ -83,7 +83,29 @@ yarn dev          # 개발 서버 시작
 yarn build        # 프로덕션 빌드
 yarn prisma migrate dev  # DB 마이그레이션
 yarn prisma studio       # DB GUI
+yarn sync-votes   # 배치: 22대 국회 모든 안건 및 표결 정보 동기화
 ```
+
+## 데이터 관리
+
+### 배치 스크립트 (`yarn sync-votes`)
+
+22대 국회의 모든 안건과 표결 정보를 DB에 동기화하는 스크립트.
+
+**기능**:
+- 본회의 처리안건을 페이지별로 가져오기 (100개씩)
+- 각 안건의 모든 표결 정보 저장 (최대 500명)
+- 의원 정보 자동 upsert
+- **중단 후 재시작 가능**: 이미 동기화된 안건은 자동 스킵
+
+**실행 시간**: 5~10분 (안건 수에 따라 다름)
+
+**주의**: 초기 실행 시 한 번만 돌리면 되며, 이후에는 주기적으로 실행하여 새로운 안건 추가 가능
+
+### GitHub Actions 자동화
+
+매일 새벽 3시에 자동으로 `sync-votes` 실행 (배포 시 설정)
+- 상세: `src/docs/github-actions-batch.md` 참고
 
 ## 주의사항
 
@@ -132,13 +154,34 @@ yarn prisma studio       # DB GUI
   - 새로운 아이템에만 fade-in 애니메이션
   - 표결 카드 클릭 시 안건 상세 페이지로 이동
 
-## 블로그 작성
+### 메인 페이지 기본 리스트 (2025-01-06)
+- 의원 탭: 랜덤 30명 표시 (PostgreSQL `RANDOM()`)
+- 안건 탭: 최신 30건 표시 (voteDate DESC)
+- 검색어 입력 전에도 리스트 확인 가능
+- 토글 전환 시 자동 새로고침
 
-- src/docs 폴더에 md파일로 작성
+### 배치 스크립트 & 자동화 (2025-01-06)
+- 22대 국회 모든 안건 및 표결 정보 동기화 스크립트 (`scripts/sync-all-votes.ts`)
+- 중단 후 재시작 지원 (이미 처리한 안건 자동 스킵)
+- GitHub Actions를 통한 자동화 준비 완료
+- 상세 문서: `src/docs/github-actions-batch.md`
+
+## 개발 팁
+
+### 테스트 API 작성
+
+`src/app/api/test/` 폴더에 테스트용 API를 작성할 수 있습니다.
+- `.gitignore`에 등록되어 있어 커밋되지 않음
+- Open API 호출 테스트, 데이터 변환 테스트 등에 활용
+
+### 블로그 작성
+
+- `src/docs` 폴더에 md파일로 작성
 - 말투는 일기 쓰듯이 자유롭게
 - 코드 스니펫 포함 가능
+- `.gitignore`에 등록되어 있어 커밋되지 않음
 
-## git
+### Git
 
-- commit, pr은 .github/contributing.md 참고
+- commit, pr은 `.github/contributing.md` 참고
 - commit은 하나로 합치기 보다는, 기능별로 여러개로 묶어서 해도 됨
