@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { fetchVoteRecords } from '@/lib/assembly-api';
 
+const VOTES_PER_PAGE = 50;
+
 // 특정 의원의 표결 내역 조회
 export async function GET(
   request: NextRequest,
@@ -9,9 +11,12 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    const searchParams = request.nextUrl.searchParams;
+    const page = parseInt(searchParams.get('page') || '1');
+    const pageSize = parseInt(searchParams.get('pageSize') || String(VOTES_PER_PAGE));
 
     // 1. DB에서 의원 정보와 표결 내역 조회
-    const memberData = await prisma.assemblyMember.findUnique({
+    let memberData = await prisma.assemblyMember.findUnique({
       where: { id: parseInt(id) },
       include: {
         votes: {
@@ -41,11 +46,11 @@ export async function GET(
     // 안건 목록을 먼저 가져온 후 각 안건별로 표결 정보를 조회해야 함
     if (member.votes.length === 0) {
       try {
-        // Step 1: 안건 목록 가져오기 (최근 100개)
+        // Step 1: 안건 목록 가져오기 (최근 50개)
         const { fetchBills } = await import('@/lib/assembly-api');
         const billsData = await fetchBills({
           age: '22',
-          pSize: 20, // 일단 20개만
+          pSize: 50,
         });
 
         // Step 2: 안건 데이터 파싱
@@ -149,7 +154,7 @@ export async function GET(
           console.log(`Total votes found for ${member.name}: ${votesFound}`);
 
           // DB에서 다시 조회
-          member = await prisma.assemblyMember.findUnique({
+          const updatedMember = await prisma.assemblyMember.findUnique({
             where: { id: member.id },
             include: {
               votes: {
@@ -163,14 +168,50 @@ export async function GET(
                 },
               },
             },
-          }) || member;
+          });
+
+          if (updatedMember) {
+            member = updatedMember;
+          }
         }
       } catch (error) {
         console.error('External API error:', error);
       }
     }
 
-    return NextResponse.json({ member });
+    // 3. 표결 결과 통계 계산 (전체 데이터 기준)
+    const voteStats = member.votes.reduce(
+      (acc, vote) => {
+        acc[vote.result]++;
+        return acc;
+      },
+      { FAVOR: 0, AGAINST: 0, ABSTAIN: 0, ABSENT: 0 } as Record<string, number>
+    );
+
+    // 4. 페이지네이션된 응답 반환 (DB에서만 처리)
+    const totalVotes = member.votes.length;
+    const startIndex = (page - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    const paginatedVotes = member.votes.slice(startIndex, endIndex);
+
+    // hasMore 판단: DB에 더 많은 데이터가 있는지만 확인
+    const hasMore = endIndex < totalVotes;
+
+    console.log(`Pagination: page=${page}, totalVotes=${totalVotes}, returning ${paginatedVotes.length} votes, hasMore=${hasMore}`);
+
+    return NextResponse.json({
+      member: {
+        ...member,
+        votes: paginatedVotes,
+      },
+      stats: voteStats,
+      pagination: {
+        page,
+        pageSize,
+        total: totalVotes,
+        hasMore,
+      },
+    });
   } catch (error) {
     console.error('Error fetching member votes:', error);
     return NextResponse.json(
