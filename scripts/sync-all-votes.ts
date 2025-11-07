@@ -166,67 +166,89 @@ async function main() {
           const votes = voteRowData.row;
           console.log(`${progress} 💾 ${votes.length}명의 표결 정보 저장 중...`);
 
-          // 의원 및 표결 정보 저장
+          // ✨ 성능 개선: 병렬 처리 + 트랜잭션으로 속도 향상 및 원자성 보장
+          const BATCH_SIZE = 50; // 한 번에 처리할 배치 크기
           let voteCount = 0;
-          let memberCount = 0;
+          let memberCount = votes.length;
 
-          for (const voteRecord of votes) {
-            // 의원 정보 저장
-            const member = await prisma.assemblyMember.upsert({
-              where: { memberId: voteRecord.MONA_CD },
-              create: {
-                memberId: voteRecord.MONA_CD,
-                name: voteRecord.HG_NM,
-                engName: null,
-                party: voteRecord.POLY_NM,
-                district: voteRecord.ORIG_NM,
-                committee: null,
-                termNumber: parseInt(voteRecord.AGE) || 22,
-                reelection: false,
-                profileUrl: null,
-              },
-              update: {
-                name: voteRecord.HG_NM,
-                party: voteRecord.POLY_NM,
-                district: voteRecord.ORIG_NM,
-              },
-            });
+          // 배치별로 처리
+          for (let batchStart = 0; batchStart < votes.length; batchStart += BATCH_SIZE) {
+            const batch = votes.slice(batchStart, batchStart + BATCH_SIZE);
 
-            memberCount++;
+            try {
+              await prisma.$transaction(async (tx) => {
+                // 1. 의원 정보 병렬 처리 (먼저 모든 의원 저장)
+                const memberPromises = batch.map((voteRecord: any) =>
+                  tx.assemblyMember.upsert({
+                    where: { memberId: voteRecord.MONA_CD },
+                    create: {
+                      memberId: voteRecord.MONA_CD,
+                      name: voteRecord.HG_NM,
+                      engName: null,
+                      party: voteRecord.POLY_NM,
+                      district: voteRecord.ORIG_NM,
+                      committee: null,
+                      termNumber: parseInt(voteRecord.AGE) || 22,
+                      reelection: false,
+                      profileUrl: null,
+                    },
+                    update: {
+                      name: voteRecord.HG_NM,
+                      party: voteRecord.POLY_NM,
+                      district: voteRecord.ORIG_NM,
+                    },
+                  })
+                );
 
-            // 표결 결과 매핑
-            let voteResult: 'FAVOR' | 'AGAINST' | 'ABSTAIN' | 'ABSENT';
-            const resultStr = voteRecord.RESULT_VOTE_MOD?.trim();
+                const members = await Promise.all(memberPromises);
 
-            if (resultStr === '찬성' || resultStr === '가') {
-              voteResult = 'FAVOR';
-            } else if (resultStr === '반대' || resultStr === '부') {
-              voteResult = 'AGAINST';
-            } else if (resultStr === '기권') {
-              voteResult = 'ABSTAIN';
-            } else {
-              voteResult = 'ABSENT';
+                // 2. 표결 정보 병렬 처리
+                const votePromises = batch.map((voteRecord: any, index: number) => {
+                  // 표결 결과 매핑
+                  let voteResult: 'FAVOR' | 'AGAINST' | 'ABSTAIN' | 'ABSENT';
+                  const resultStr = voteRecord.RESULT_VOTE_MOD?.trim();
+
+                  if (resultStr === '찬성' || resultStr === '가') {
+                    voteResult = 'FAVOR';
+                  } else if (resultStr === '반대' || resultStr === '부') {
+                    voteResult = 'AGAINST';
+                  } else if (resultStr === '기권') {
+                    voteResult = 'ABSTAIN';
+                  } else {
+                    voteResult = 'ABSENT';
+                  }
+
+                  return tx.vote.upsert({
+                    where: {
+                      memberId_billId: {
+                        memberId: members[index].id,
+                        billId: bill.id,
+                      },
+                    },
+                    create: {
+                      memberId: members[index].id,
+                      billId: bill.id,
+                      result: voteResult,
+                    },
+                    update: {
+                      result: voteResult,
+                    },
+                  });
+                });
+
+                await Promise.all(votePromises);
+                voteCount += batch.length;
+              });
+
+              // 진행 상황 표시 (큰 데이터셋인 경우)
+              if (votes.length > BATCH_SIZE) {
+                const progress = Math.min(batchStart + BATCH_SIZE, votes.length);
+                console.log(`  └─ ${progress}/${votes.length} 처리됨...`);
+              }
+            } catch (error: any) {
+              console.error(`  └─ ❌ 배치 ${batchStart}-${batchStart + BATCH_SIZE} 저장 실패:`, error.message);
+              throw error; // 전체 안건 실패로 처리
             }
-
-            // 표결 정보 저장
-            await prisma.vote.upsert({
-              where: {
-                memberId_billId: {
-                  memberId: member.id,
-                  billId: bill.id,
-                },
-              },
-              create: {
-                memberId: member.id,
-                billId: bill.id,
-                result: voteResult,
-              },
-              update: {
-                result: voteResult,
-              },
-            });
-
-            voteCount++;
           }
 
           totalVotes += voteCount;
