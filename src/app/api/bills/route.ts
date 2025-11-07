@@ -11,12 +11,17 @@ export async function GET(request: NextRequest) {
     const proposer = searchParams.get('proposer');
     const limit = parseInt(searchParams.get('limit') || '30');
 
-    // 1. DB에서 먼저 검색
+    // 1. DB에서 먼저 검색 (표결 데이터 카운트 포함)
     let bills = await prisma.bill.findMany({
       where: {
         ...(title && { billName: { contains: title } }),
         ...(billNo && { billNumber: billNo }),
         ...(proposer && { proposer: { contains: proposer } }),
+      },
+      include: {
+        _count: {
+          select: { votes: true },
+        },
       },
       take: limit,
       orderBy: { voteDate: 'desc' },

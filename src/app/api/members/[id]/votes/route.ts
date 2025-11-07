@@ -71,23 +71,24 @@ export async function GET(
             }
 
             try {
+              // ✨ HG_NM 파라미터 추가: 해당 의원의 표결만 가져오기 (응답 크기 대폭 감소)
               const voteData = await fetchVoteRecords({
                 billId: billData.BILL_ID,
+                memberName: member.name, // HG_NM 필터 추가
                 age: '22',
+                pSize: 1, // 1명만 가져오면 충분
               });
 
               const voteResponseKey = Object.keys(voteData)[0];
               const voteResponseData = voteData[voteResponseKey];
               const voteRowData = voteResponseData.find((item: any) => item.row);
 
-              if (voteRowData && voteRowData.row && member) {
-                // 해당 의원의 표결만 찾기
-                const memberVote = voteRowData.row.find(
-                  (vote: any) => vote.HG_NM === member.name
-                );
+              if (voteRowData && voteRowData.row && voteRowData.row.length > 0 && member) {
+                // HG_NM 필터 덕분에 첫 번째 항목이 바로 해당 의원의 표결
+                const memberVote = voteRowData.row[0];
 
                 if (memberVote) {
-                  console.log(`Found vote for ${member.name} on ${billData.BILL_NM}: ${memberVote.RESULT_VOTE_MOD}`);
+                  console.log(`✅ Found vote for ${member.name} on ${billData.BILL_NM}: ${memberVote.RESULT_VOTE_MOD}`);
                   votesFound++;
 
                   // DB에 저장

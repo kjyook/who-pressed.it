@@ -17,6 +17,9 @@ interface Bill {
   proposer: string | null;
   voteDate: string;
   isPassed: boolean;
+  _count?: {
+    votes: number;
+  };
 }
 
 export default function Home() {
@@ -197,35 +200,46 @@ export default function Home() {
               {searchQuery ? `검색 결과 (${billResults.length}건)` : `최근 안건 목록 (${billResults.length}건)`}
             </h2>
             <div className="space-y-3">
-              {billResults.map((bill) => (
-                <button
-                  key={bill.id}
-                  onClick={() => router.push(`/bills/${bill.id}`)}
-                  className="w-full bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg hover:shadow-xl transition-shadow text-left"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
-                        {bill.billName}
-                      </h3>
-                      <div className="flex items-center gap-4 text-sm text-gray-600 dark:text-gray-400">
-                        <span>의안번호: {bill.billNumber}</span>
-                        <span>•</span>
-                        <span>
-                          표결일: {new Date(bill.voteDate).toLocaleDateString('ko-KR')}
-                        </span>
-                        {bill.proposer && (
-                          <>
-                            <span>•</span>
-                            <span>제안: {bill.proposer}</span>
-                          </>
-                        )}
+              {billResults.map((bill) => {
+                const hasVotes = bill._count && bill._count.votes > 0;
+
+                return (
+                  <button
+                    key={bill.id}
+                    onClick={() => router.push(`/bills/${bill.id}`)}
+                    className="w-full bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg hover:shadow-xl transition-shadow text-left"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                            {bill.billName}
+                          </h3>
+                          {!hasVotes && (
+                            <span className="px-2 py-1 bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300 rounded text-xs font-semibold">
+                              표결없음
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-4 text-sm text-gray-600 dark:text-gray-400">
+                          <span>의안번호: {bill.billNumber}</span>
+                          <span>•</span>
+                          <span>
+                            표결일: {new Date(bill.voteDate).toLocaleDateString('ko-KR')}
+                          </span>
+                          {bill.proposer && (
+                            <>
+                              <span>•</span>
+                              <span>제안: {bill.proposer}</span>
+                            </>
+                          )}
+                        </div>
                       </div>
+                      <span className="text-blue-600 dark:text-blue-400 text-xl">→</span>
                     </div>
-                    <span className="text-blue-600 dark:text-blue-400 text-xl">→</span>
-                  </div>
-                </button>
-              ))}
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}

@@ -273,25 +273,53 @@ export default function BillDetailPage() {
 
           {/* 데이터 없음 */}
           {!votesLoading && allVotes.length === 0 && !hasMore && (
-            <div className="mb-6 bg-yellow-50 dark:bg-yellow-900 border border-yellow-200 dark:border-yellow-700 rounded-lg p-4">
-              <p className="text-yellow-800 dark:text-yellow-200">
-                이 안건에 대한 표결 데이터가 API에 없습니다. 본회의 표결을 거치지 않았거나 아직 API에 등록되지 않았을 수 있습니다.
-              </p>
+            <div className="mb-6 bg-yellow-50 dark:bg-yellow-900 border border-yellow-200 dark:border-yellow-700 rounded-lg p-6">
+              <div className="flex items-start gap-3">
+                <svg
+                  className="w-6 h-6 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <div className="flex-1">
+                  <h3 className="text-yellow-900 dark:text-yellow-100 font-bold text-lg mb-2">
+                    표결 데이터 없음
+                  </h3>
+                  <p className="text-yellow-800 dark:text-yellow-200 mb-3">
+                    이 안건에 대한 표결 데이터가 없습니다. 다음 중 하나의 사유일 수 있습니다:
+                  </p>
+                  <ul className="list-disc list-inside text-yellow-800 dark:text-yellow-200 space-y-1 ml-2">
+                    <li>본회의 표결을 거치지 않음 (위원회 심사 단계)</li>
+                    <li>합의 처리 또는 무기명 표결</li>
+                    <li>표결 데이터가 아직 Open API에 등록되지 않음</li>
+                    <li>폐기되거나 철회된 안건</li>
+                  </ul>
+                </div>
+              </div>
             </div>
           )}
 
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-              의원별 표결 내역
-              {stats && (
-                <span className="text-gray-600 dark:text-gray-400 ml-2">
-                  (현재 {allVotes.length}명 로드됨)
-                </span>
-              )}
-            </h2>
+          {/* 필터 및 제목 - 표결 데이터가 있을 때만 표시 */}
+          {(allVotes.length > 0 || votesLoading) && (
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                의원별 표결 내역
+                {stats && (
+                  <span className="text-gray-600 dark:text-gray-400 ml-2">
+                    (현재 {allVotes.length}명 로드됨)
+                  </span>
+                )}
+              </h2>
 
-            {/* Filter Buttons */}
-            <div className="flex gap-2">
+              {/* Filter Buttons */}
+              <div className="flex gap-2">
               <button
                 onClick={() => setFilter('all')}
                 className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
@@ -343,7 +371,8 @@ export default function BillDetailPage() {
                 불참
               </button>
             </div>
-          </div>
+            </div>
+          )}
 
           {/* 초기 로딩 스켈레톤 */}
           {votesLoading && allVotes.length === 0 ? (
