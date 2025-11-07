@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
 
 interface Vote {
   id: number;
@@ -40,111 +41,61 @@ const VOTES_PER_PAGE = 50;
 export default function BillDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const [bill, setBill] = useState<Bill | null>(null);
-  const [allVotes, setAllVotes] = useState<Vote[]>([]);
-  const [stats, setStats] = useState<BillStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [votesLoading, setVotesLoading] = useState(false);
   const [filter, setFilter] = useState<'all' | 'FAVOR' | 'AGAINST' | 'ABSTAIN' | 'ABSENT'>('all');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
   const [previousLength, setPreviousLength] = useState(0);
-  const [loadedPages, setLoadedPages] = useState<Set<number>>(new Set());
   const loadMoreRef = useRef<HTMLDivElement>(null);
-  const isFetchingRef = useRef(false);
 
-  // 안건 기본 정보 로드
-  useEffect(() => {
-    const fetchBill = async () => {
-      try {
-        // 새로운 안건이면 모든 상태 초기화
-        setAllVotes([]);
-        setLoadedPages(new Set());
-        setCurrentPage(1);
-        setPreviousLength(0);
-        setHasMore(true);
+  const billId = params.id as string;
 
-        const response = await fetch(`/api/bills/${params.id}`);
-        const data = await response.json();
-        setBill(data.bill);
-        setLoading(false);
-      } catch (error) {
-        console.error('Failed to fetch bill:', error);
-        setLoading(false);
-      }
-    };
+  // ✨ React Query로 안건 기본 정보 조회
+  const { data: billData, isLoading: billLoading } = useQuery({
+    queryKey: ['bill', billId],
+    queryFn: async () => {
+      const response = await fetch(`/api/bills/${billId}`);
+      if (!response.ok) throw new Error('Failed to fetch bill');
+      return response.json();
+    },
+    enabled: !!billId,
+  });
 
-    if (params.id) {
-      fetchBill();
-    }
-  }, [params.id]);
-
-  // 표결 데이터 페이지별 로드
-  const fetchVotesPage = useCallback(async (page: number) => {
-    // 이미 로드 중이거나 이미 로드한 페이지면 중단
-    if (isFetchingRef.current) {
-      console.log(`Already fetching, skipping page ${page}`);
-      return;
-    }
-
-    if (loadedPages.has(page)) {
-      console.log(`Page ${page} already loaded, skipping`);
-      return;
-    }
-
-    console.log(`Fetching page ${page}...`);
-    isFetchingRef.current = true;
-    setVotesLoading(true);
-
-    try {
+  // ✨ useInfiniteQuery로 표결 데이터 무한 스크롤
+  const {
+    data: votesData,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading: votesLoading,
+  } = useInfiniteQuery({
+    queryKey: ['billVotes', billId],
+    queryFn: async ({ pageParam = 1 }) => {
       const response = await fetch(
-        `/api/bills/${params.id}/votes?page=${page}&pageSize=${VOTES_PER_PAGE}`
+        `/api/bills/${billId}/votes?page=${pageParam}&pageSize=${VOTES_PER_PAGE}`
       );
-      const data = await response.json();
+      if (!response.ok) throw new Error('Failed to fetch votes');
+      return response.json();
+    },
+    getNextPageParam: (lastPage) => {
+      return lastPage.pagination.hasMore
+        ? lastPage.pagination.page + 1
+        : undefined;
+    },
+    enabled: !!billId,
+    initialPageParam: 1,
+  });
 
-      if (data.bill && data.bill.votes) {
-        // 이전 길이 저장 (애니메이션 용도)
-        setAllVotes((prev) => {
-          setPreviousLength(prev.length);
-          return [...prev, ...data.bill.votes];
-        });
-        setStats(data.stats);
-        setHasMore(data.pagination.hasMore);
-        setLoadedPages((prev) => new Set([...prev, page]));
-        console.log(`Successfully loaded page ${page}, total votes: ${data.bill.votes.length}`);
-      }
-    } catch (error) {
-      console.error('Failed to fetch votes:', error);
-    } finally {
-      setVotesLoading(false);
-      isFetchingRef.current = false;
-    }
-  }, [params.id, loadedPages]);
+  const bill = billData?.bill;
+  const stats = votesData?.pages[0]?.stats;
 
-  // 초기 표결 데이터 로드
-  useEffect(() => {
-    if (bill && allVotes.length === 0) {
-      fetchVotesPage(1);
-    }
-  }, [bill]);
-
-  // 다음 페이지 로드
-  const loadMoreVotes = useCallback(() => {
-    if (hasMore && !votesLoading) {
-      setCurrentPage((prev) => {
-        const nextPage = prev + 1;
-        fetchVotesPage(nextPage);
-        return nextPage;
-      });
-    }
-  }, [hasMore, votesLoading, fetchVotesPage]);
+  // 모든 페이지의 표결 데이터를 평탄화
+  const allVotes = votesData?.pages.flatMap(page => page.bill?.votes || []) || [];
 
   // Infinite Scroll Observer
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting) {
-          loadMoreVotes();
+        if (entries[0].isIntersecting && hasNextPage && !isFetchingNextPage) {
+          setPreviousLength(allVotes.length);
+          fetchNextPage();
         }
       },
       { threshold: 0.1 }
@@ -155,15 +106,14 @@ export default function BillDetailPage() {
     }
 
     return () => observer.disconnect();
-  }, [loadMoreVotes]);
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage, allVotes.length]);
 
   // 필터 변경 시 previousLength 초기화
   useEffect(() => {
     setPreviousLength(0);
-    // 필터 변경 시에는 loadedPages 초기화 안함 (데이터는 이미 로드됨)
   }, [filter]);
 
-  if (loading) {
+  if (billLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-xl">로딩 중...</div>
@@ -255,7 +205,7 @@ export default function BillDetailPage() {
         {/* Votes List */}
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8">
           {/* 초기 로딩 메시지 */}
-          {votesLoading && allVotes.length === 0 && (
+          {(votesLoading || isFetchingNextPage) && allVotes.length === 0 && (
             <div className="mb-6 bg-blue-50 dark:bg-blue-900 border border-blue-200 dark:border-blue-700 rounded-lg p-4">
               <div className="flex items-center gap-3">
                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
@@ -272,7 +222,7 @@ export default function BillDetailPage() {
           )}
 
           {/* 데이터 없음 */}
-          {!votesLoading && allVotes.length === 0 && !hasMore && (
+          {!votesLoading && !isFetchingNextPage && allVotes.length === 0 && !hasNextPage && (
             <div className="mb-6 bg-yellow-50 dark:bg-yellow-900 border border-yellow-200 dark:border-yellow-700 rounded-lg p-6">
               <div className="flex items-start gap-3">
                 <svg
@@ -375,7 +325,7 @@ export default function BillDetailPage() {
           )}
 
           {/* 초기 로딩 스켈레톤 */}
-          {votesLoading && allVotes.length === 0 ? (
+          {(votesLoading || isFetchingNextPage) && allVotes.length === 0 ? (
             <div className="text-center py-12">
               <div className="animate-pulse space-y-4">
                 <div className="h-20 bg-gray-200 dark:bg-gray-700 rounded"></div>
@@ -439,12 +389,12 @@ export default function BillDetailPage() {
             </div>
 
             {/* Infinite Scroll Trigger - 보이지 않는 감지 영역 */}
-            {hasMore && !votesLoading && (
+            {hasNextPage && !isFetchingNextPage && (
               <div ref={loadMoreRef} className="h-10" />
             )}
 
             {/* 완료 메시지 */}
-            {!hasMore && allVotes.length > 0 && (
+            {!hasNextPage && allVotes.length > 0 && (
               <p className="py-8 text-center text-gray-600 dark:text-gray-400">
                 모든 의원의 표결 내역을 표시했습니다. (총 {allVotes.length}명)
               </p>

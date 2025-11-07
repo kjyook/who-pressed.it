@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useInfiniteQuery } from '@tanstack/react-query';
 
 interface Vote {
   id: number;
@@ -39,110 +40,49 @@ const VOTES_PER_PAGE = 50;
 export default function MemberDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const [member, setMember] = useState<Member | null>(null);
-  const [allVotes, setAllVotes] = useState<Vote[]>([]);
-  const [stats, setStats] = useState<VoteStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [votesLoading, setVotesLoading] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
   const [previousLength, setPreviousLength] = useState(0);
-  const [loadedPages, setLoadedPages] = useState<Set<number>>(new Set());
   const loadMoreRef = useRef<HTMLDivElement>(null);
-  const isFetchingRef = useRef(false);
 
-  // 의원 기본 정보 로드
-  useEffect(() => {
-    const fetchMember = async () => {
-      try {
-        // 새로운 의원이면 모든 상태 초기화
-        setAllVotes([]);
-        setLoadedPages(new Set());
-        setCurrentPage(1);
-        setPreviousLength(0);
-        setHasMore(true);
+  const memberId = params.id as string;
 
-        const response = await fetch(`/api/members/${params.id}/votes`);
-        const data = await response.json();
-        setMember(data.member);
-        setLoading(false);
-      } catch (error) {
-        console.error('Failed to fetch member:', error);
-        setLoading(false);
-      }
-    };
-
-    if (params.id) {
-      fetchMember();
-    }
-  }, [params.id]);
-
-  // 표결 데이터 페이지별 로드
-  const fetchVotesPage = useCallback(async (page: number) => {
-    // 이미 로드 중이거나 이미 로드한 페이지면 중단
-    if (isFetchingRef.current) {
-      console.log(`Already fetching, skipping page ${page}`);
-      return;
-    }
-
-    if (loadedPages.has(page)) {
-      console.log(`Page ${page} already loaded, skipping`);
-      return;
-    }
-
-    console.log(`Fetching page ${page}...`);
-    isFetchingRef.current = true;
-    setVotesLoading(true);
-
-    try {
+  // ✨ useInfiniteQuery로 의원 정보 + 표결 데이터 무한 스크롤
+  const {
+    data: votesData,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+  } = useInfiniteQuery({
+    queryKey: ['memberVotes', memberId],
+    queryFn: async ({ pageParam = 1 }) => {
       const response = await fetch(
-        `/api/members/${params.id}/votes?page=${page}&pageSize=${VOTES_PER_PAGE}`
+        `/api/members/${memberId}/votes?page=${pageParam}&pageSize=${VOTES_PER_PAGE}`
       );
-      const data = await response.json();
+      if (!response.ok) throw new Error('Failed to fetch member votes');
+      return response.json();
+    },
+    getNextPageParam: (lastPage) => {
+      return lastPage.pagination.hasMore
+        ? lastPage.pagination.page + 1
+        : undefined;
+    },
+    enabled: !!memberId,
+    initialPageParam: 1,
+  });
 
-      if (data.member && data.member.votes) {
-        // 이전 길이 저장 (애니메이션 용도)
-        setAllVotes((prev) => {
-          setPreviousLength(prev.length);
-          return [...prev, ...data.member.votes];
-        });
-        setStats(data.stats);
-        setHasMore(data.pagination.hasMore);
-        setLoadedPages((prev) => new Set([...prev, page]));
-        console.log(`Successfully loaded page ${page}, total votes: ${data.member.votes.length}`);
-      }
-    } catch (error) {
-      console.error('Failed to fetch votes:', error);
-    } finally {
-      setVotesLoading(false);
-      isFetchingRef.current = false;
-    }
-  }, [params.id, loadedPages]);
+  const member = votesData?.pages[0]?.member;
+  const stats = votesData?.pages[0]?.stats;
 
-  // 초기 표결 데이터 로드
-  useEffect(() => {
-    if (member && allVotes.length === 0) {
-      fetchVotesPage(1);
-    }
-  }, [member]);
-
-  // 다음 페이지 로드
-  const loadMoreVotes = useCallback(() => {
-    if (hasMore && !votesLoading) {
-      setCurrentPage((prev) => {
-        const nextPage = prev + 1;
-        fetchVotesPage(nextPage);
-        return nextPage;
-      });
-    }
-  }, [hasMore, votesLoading, fetchVotesPage]);
+  // 모든 페이지의 표결 데이터를 평탄화
+  const allVotes = votesData?.pages.flatMap(page => page.member?.votes || []) || [];
 
   // Infinite Scroll Observer
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting) {
-          loadMoreVotes();
+        if (entries[0].isIntersecting && hasNextPage && !isFetchingNextPage) {
+          setPreviousLength(allVotes.length);
+          fetchNextPage();
         }
       },
       { threshold: 0.1 }
@@ -153,9 +93,9 @@ export default function MemberDetailPage() {
     }
 
     return () => observer.disconnect();
-  }, [loadMoreVotes]);
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage, allVotes.length]);
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-xl">로딩 중...</div>
