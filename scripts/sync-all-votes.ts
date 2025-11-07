@@ -63,7 +63,7 @@ async function main() {
 
   let totalBills = 0;
   let totalVotes = 0;
-  let totalMembers = 0;
+  const uniqueMemberIds = new Set<string>(); // 유니크 의원 ID 추적
   let currentPage = 1;
   const pageSize = 100;
   let hasMore = true;
@@ -116,29 +116,24 @@ async function main() {
           }
 
           // 안건 저장
+          const billCommonData = {
+            billNumber: billData.BILL_NO,
+            billName: billData.BILL_NM,
+            proposer: billData.PROPOSER || null,
+            voteDate: billData.RGS_PROC_DT ? new Date(billData.RGS_PROC_DT) : null,
+            isPassed: billData.PROC_RESULT_CD?.includes('가결') || false,
+            favorCount: billData.YES_TCNT ? parseInt(billData.YES_TCNT) : null,
+            againstCount: billData.NO_TCNT ? parseInt(billData.NO_TCNT) : null,
+            abstainCount: billData.BLANK_TCNT ? parseInt(billData.BLANK_TCNT) : null,
+          };
+
           const bill = await prisma.bill.upsert({
             where: { billId: billData.BILL_ID },
             create: {
               billId: billData.BILL_ID,
-              billNumber: billData.BILL_NO,
-              billName: billData.BILL_NM,
-              proposer: billData.PROPOSER || null,
-              voteDate: new Date(billData.RGS_PROC_DT),
-              isPassed: billData.PROC_RESULT_CD?.includes('가결') || false,
-              favorCount: billData.YES_TCNT ? parseInt(billData.YES_TCNT) : null,
-              againstCount: billData.NO_TCNT ? parseInt(billData.NO_TCNT) : null,
-              abstainCount: billData.BLANK_TCNT ? parseInt(billData.BLANK_TCNT) : null,
+              ...billCommonData,
             },
-            update: {
-              billNumber: billData.BILL_NO,
-              billName: billData.BILL_NM,
-              proposer: billData.PROPOSER || null,
-              voteDate: new Date(billData.RGS_PROC_DT),
-              isPassed: billData.PROC_RESULT_CD?.includes('가결') || false,
-              favorCount: billData.YES_TCNT ? parseInt(billData.YES_TCNT) : null,
-              againstCount: billData.NO_TCNT ? parseInt(billData.NO_TCNT) : null,
-              abstainCount: billData.BLANK_TCNT ? parseInt(billData.BLANK_TCNT) : null,
-            },
+            update: billCommonData,
           });
 
           totalBills++;
@@ -169,7 +164,6 @@ async function main() {
           // ✨ 성능 개선: 병렬 처리 + 트랜잭션으로 속도 향상 및 원자성 보장
           const BATCH_SIZE = 50; // 한 번에 처리할 배치 크기
           let voteCount = 0;
-          let memberCount = votes.length;
 
           // 배치별로 처리
           for (let batchStart = 0; batchStart < votes.length; batchStart += BATCH_SIZE) {
@@ -178,8 +172,11 @@ async function main() {
             try {
               await prisma.$transaction(async (tx) => {
                 // 1. 의원 정보 병렬 처리 (먼저 모든 의원 저장)
-                const memberPromises = batch.map((voteRecord: any) =>
-                  tx.assemblyMember.upsert({
+                const memberPromises = batch.map((voteRecord: any) => {
+                  // 유니크 의원 ID 추적
+                  uniqueMemberIds.add(voteRecord.MONA_CD);
+
+                  return tx.assemblyMember.upsert({
                     where: { memberId: voteRecord.MONA_CD },
                     create: {
                       memberId: voteRecord.MONA_CD,
@@ -197,25 +194,30 @@ async function main() {
                       party: voteRecord.POLY_NM,
                       district: voteRecord.ORIG_NM,
                     },
-                  })
-                );
+                  });
+                });
 
                 const members = await Promise.all(memberPromises);
 
                 // 2. 표결 정보 병렬 처리
                 const votePromises = batch.map((voteRecord: any, index: number) => {
                   // 표결 결과 매핑
-                  let voteResult: 'FAVOR' | 'AGAINST' | 'ABSTAIN' | 'ABSENT';
-                  const resultStr = voteRecord.RESULT_VOTE_MOD?.trim();
+                  const voteResultMap: Record<string, 'FAVOR' | 'AGAINST' | 'ABSTAIN' | 'ABSENT'> = {
+                    '찬성': 'FAVOR',
+                    '가': 'FAVOR',
+                    '반대': 'AGAINST',
+                    '부': 'AGAINST',
+                    '기권': 'ABSTAIN',
+                    '불참': 'ABSENT',
+                  };
 
-                  if (resultStr === '찬성' || resultStr === '가') {
-                    voteResult = 'FAVOR';
-                  } else if (resultStr === '반대' || resultStr === '부') {
-                    voteResult = 'AGAINST';
-                  } else if (resultStr === '기권') {
-                    voteResult = 'ABSTAIN';
-                  } else {
-                    voteResult = 'ABSENT';
+                  const rawResult = voteRecord.RESULT_VOTE_MOD?.trim();
+                  const voteResult = voteResultMap[rawResult];
+
+                  // ✨ 예상치 못한 표결 결과 값 검증
+                  if (!voteResult) {
+                    console.error(`⚠️ 알 수 없는 표결 결과: "${rawResult}" (안건: ${billData.BILL_NM})`);
+                    throw new Error(`Unknown vote result: ${rawResult}`);
                   }
 
                   return tx.vote.upsert({
@@ -252,7 +254,6 @@ async function main() {
           }
 
           totalVotes += voteCount;
-          totalMembers = memberCount;
 
           console.log(`${progress} ✅ 완료: ${voteCount}개 표결 저장\n`);
 
@@ -283,7 +284,7 @@ async function main() {
   console.log(`  - 처리한 페이지: ${currentPage - 1}`);
   console.log(`  - 저장된 안건: ${totalBills}개`);
   console.log(`  - 저장된 표결: ${totalVotes}개`);
-  console.log(`  - 저장된 의원: ${totalMembers}명`);
+  console.log(`  - 처리된 유니크 의원: ${uniqueMemberIds.size}명`);
   console.log('='.repeat(50));
 }
 

@@ -93,38 +93,42 @@ export async function GET(
 
                   // DB에 저장
                   // 1. Bill 저장
+                  const billCommonData = {
+                    billNumber: billData.BILL_NO,
+                    billName: billData.BILL_NM,
+                    proposer: billData.PROPOSER || null,
+                    voteDate: billData.RGS_PROC_DT ? new Date(billData.RGS_PROC_DT) : null,
+                    isPassed: billData.PROC_RESULT_CD?.includes('가결') || false,
+                    favorCount: billData.YES_TCNT ? parseInt(billData.YES_TCNT) : null,
+                    againstCount: billData.NO_TCNT ? parseInt(billData.NO_TCNT) : null,
+                    abstainCount: billData.BLANK_TCNT ? parseInt(billData.BLANK_TCNT) : null,
+                  };
+
                   const savedBill = await prisma.bill.upsert({
                     where: { billId: billData.BILL_ID },
                     create: {
                       billId: billData.BILL_ID,
-                      billNumber: billData.BILL_NO,
-                      billName: billData.BILL_NM,
-                      proposer: billData.PROPOSER || null,
-                      voteDate: new Date(billData.RGS_PROC_DT),
-                      isPassed: billData.PROC_RESULT_CD?.includes('가결') || false,
-                      favorCount: billData.YES_TCNT ? parseInt(billData.YES_TCNT) : null,
-                      againstCount: billData.NO_TCNT ? parseInt(billData.NO_TCNT) : null,
-                      abstainCount: billData.BLANK_TCNT ? parseInt(billData.BLANK_TCNT) : null,
+                      ...billCommonData,
                     },
-                    update: {
-                      billNumber: billData.BILL_NO,
-                      billName: billData.BILL_NM,
-                      proposer: billData.PROPOSER || null,
-                      voteDate: new Date(billData.RGS_PROC_DT),
-                      isPassed: billData.PROC_RESULT_CD?.includes('가결') || false,
-                      favorCount: billData.YES_TCNT ? parseInt(billData.YES_TCNT) : null,
-                      againstCount: billData.NO_TCNT ? parseInt(billData.NO_TCNT) : null,
-                      abstainCount: billData.BLANK_TCNT ? parseInt(billData.BLANK_TCNT) : null,
-                    },
+                    update: billCommonData,
                   });
 
                   // 2. Vote 저장
-                  const voteResultMap: Record<string, any> = {
+                  const voteResultMap: Record<string, 'FAVOR' | 'AGAINST' | 'ABSTAIN' | 'ABSENT'> = {
                     '찬성': 'FAVOR',
                     '반대': 'AGAINST',
                     '기권': 'ABSTAIN',
                     '불참': 'ABSENT',
                   };
+
+                  const rawResult = memberVote.RESULT_VOTE_MOD;
+                  const voteResult = voteResultMap[rawResult];
+
+                  // ✨ 예상치 못한 표결 결과 값 검증
+                  if (!voteResult) {
+                    console.error(`⚠️ 알 수 없는 표결 결과: "${rawResult}" (의원: ${member.name}, 안건: ${savedBill.billName})`);
+                    throw new Error(`Unknown vote result: ${rawResult}`);
+                  }
 
                   await prisma.vote.upsert({
                     where: {
@@ -136,10 +140,10 @@ export async function GET(
                     create: {
                       memberId: member.id,
                       billId: savedBill.id,
-                      result: voteResultMap[memberVote.RESULT_VOTE_MOD] || 'ABSTAIN',
+                      result: voteResult,
                     },
                     update: {
-                      result: voteResultMap[memberVote.RESULT_VOTE_MOD] || 'ABSTAIN',
+                      result: voteResult,
                     },
                   });
                 }
