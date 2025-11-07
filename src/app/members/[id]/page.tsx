@@ -192,7 +192,7 @@ export default function MemberDetailPage() {
         {/* Vote History */}
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8">
           {/* 초기 로딩 메시지 */}
-          {votesLoading && allVotes.length === 0 && (
+          {isLoading && allVotes.length === 0 && (
             <div className="mb-6 bg-blue-50 dark:bg-blue-900 border border-blue-200 dark:border-blue-700 rounded-lg p-4">
               <div className="flex items-center gap-3">
                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
@@ -209,7 +209,7 @@ export default function MemberDetailPage() {
           )}
 
           {/* 데이터 없음 */}
-          {!votesLoading && allVotes.length === 0 && !hasMore && (
+          {!isLoading && allVotes.length === 0 && !hasNextPage && (
             <div className="mb-6 bg-yellow-50 dark:bg-yellow-900 border border-yellow-200 dark:border-yellow-700 rounded-lg p-4">
               <p className="text-yellow-800 dark:text-yellow-200">
                 이 의원의 표결 데이터가 없습니다.
@@ -227,7 +227,7 @@ export default function MemberDetailPage() {
           </h2>
 
           {/* 초기 로딩 스켈레톤 */}
-          {votesLoading && allVotes.length === 0 ? (
+          {isLoading && allVotes.length === 0 ? (
             <div className="text-center py-12">
               <div className="animate-pulse space-y-4">
                 <div className="h-20 bg-gray-200 dark:bg-gray-700 rounded"></div>
@@ -301,12 +301,12 @@ export default function MemberDetailPage() {
               </div>
 
               {/* Infinite Scroll Trigger - 보이지 않는 감지 영역 */}
-              {hasMore && !votesLoading && (
+              {hasNextPage && !isLoading && (
                 <div ref={loadMoreRef} className="h-10" />
               )}
 
               {/* 완료 메시지 */}
-              {!hasMore && allVotes.length > 0 && (
+              {!hasNextPage && allVotes.length > 0 && (
                 <p className="py-8 text-center text-gray-600 dark:text-gray-400">
                   모든 표결 내역을 표시했습니다. (총 {allVotes.length}건)
                 </p>

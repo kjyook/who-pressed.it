@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
         // API 응답 파싱
         const responseKey = Object.keys(apiData)[0];
         const responseData = apiData[responseKey];
-        const rowData = responseData.find((item: any) => item.row);
+        const rowData = responseData.find((item: { row?: unknown }) => item.row);
 
         if (rowData && rowData.row && rowData.row.length > 0) {
           // DB에 저장
@@ -56,19 +56,23 @@ export async function GET(request: NextRequest) {
                 ? new Date(billData.RGS_PROC_DT.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3'))
                 : null,
               isPassed: billData.PROC_RESULT_CD?.includes('가결') || false,
-              favorCount: parseInt(billData.YES_TCNT) || null,
-              againstCount: parseInt(billData.NO_TCNT) || null,
-              abstainCount: parseInt(billData.BLANK_TCNT) || null,
+              favorCount: billData.YES_TCNT ? parseInt(billData.YES_TCNT) : null,
+              againstCount: billData.NO_TCNT ? parseInt(billData.NO_TCNT) : null,
+              abstainCount: billData.BLANK_TCNT ? parseInt(billData.BLANK_TCNT) : null,
             };
 
             const savedBill = await prisma.bill.upsert({
               where: { billId: billData.BILL_ID },
               create: {
                 billId: billData.BILL_ID,
-                absentCount: null,
                 ...billCommonData,
               },
               update: billCommonData,
+              include: {
+                _count: {
+                  select: { votes: true },
+                },
+              },
             });
 
             bills.push(savedBill);
