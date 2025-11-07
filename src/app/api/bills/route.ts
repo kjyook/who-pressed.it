@@ -2,22 +2,28 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { fetchBills } from '@/lib/assembly-api';
 
-// 안건 목록 조회 (검색)
+// 안건 목록 조회 (검색 또는 전체 리스트)
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const title = searchParams.get('title');
     const billNo = searchParams.get('billNo');
     const proposer = searchParams.get('proposer');
+    const limit = parseInt(searchParams.get('limit') || '30');
 
-    // 1. DB에서 먼저 검색
+    // 1. DB에서 먼저 검색 (표결 데이터 카운트 포함)
     let bills = await prisma.bill.findMany({
       where: {
         ...(title && { billName: { contains: title } }),
         ...(billNo && { billNumber: billNo }),
         ...(proposer && { proposer: { contains: proposer } }),
       },
-      take: 100,
+      include: {
+        _count: {
+          select: { votes: true },
+        },
+      },
+      take: limit,
       orderBy: { voteDate: 'desc' },
     });
 
@@ -37,38 +43,35 @@ export async function GET(request: NextRequest) {
         // API 응답 파싱
         const responseKey = Object.keys(apiData)[0];
         const responseData = apiData[responseKey];
-        const rowData = responseData.find((item: any) => item.row);
+        const rowData = responseData.find((item: { row?: unknown }) => item.row);
 
         if (rowData && rowData.row && rowData.row.length > 0) {
           // DB에 저장
           for (const billData of rowData.row) {
+            const billCommonData = {
+              billNumber: billData.BILL_NO,
+              billName: billData.BILL_NM,
+              proposer: billData.PROPOSER || null,
+              voteDate: billData.RGS_PROC_DT
+                ? new Date(billData.RGS_PROC_DT.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3'))
+                : null,
+              isPassed: billData.PROC_RESULT_CD?.includes('가결') || false,
+              favorCount: billData.YES_TCNT ? parseInt(billData.YES_TCNT) : null,
+              againstCount: billData.NO_TCNT ? parseInt(billData.NO_TCNT) : null,
+              abstainCount: billData.BLANK_TCNT ? parseInt(billData.BLANK_TCNT) : null,
+            };
+
             const savedBill = await prisma.bill.upsert({
               where: { billId: billData.BILL_ID },
               create: {
                 billId: billData.BILL_ID,
-                billNumber: billData.BILL_NO,
-                billName: billData.BILL_NM,
-                proposer: billData.PROPOSER || null,
-                voteDate: billData.RGS_PROC_DT
-                  ? new Date(billData.RGS_PROC_DT.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3'))
-                  : new Date(),
-                isPassed: billData.PROC_RESULT_CD?.includes('가결') || false,
-                favorCount: parseInt(billData.YES_TCNT) || null,
-                againstCount: parseInt(billData.NO_TCNT) || null,
-                abstainCount: parseInt(billData.BLANK_TCNT) || null,
-                absentCount: null,
+                ...billCommonData,
               },
-              update: {
-                billNumber: billData.BILL_NO,
-                billName: billData.BILL_NM,
-                proposer: billData.PROPOSER || null,
-                voteDate: billData.RGS_PROC_DT
-                  ? new Date(billData.RGS_PROC_DT.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3'))
-                  : new Date(),
-                isPassed: billData.PROC_RESULT_CD?.includes('가결') || false,
-                favorCount: parseInt(billData.YES_TCNT) || null,
-                againstCount: parseInt(billData.NO_TCNT) || null,
-                abstainCount: parseInt(billData.BLANK_TCNT) || null,
+              update: billCommonData,
+              include: {
+                _count: {
+                  select: { votes: true },
+                },
               },
             });
 

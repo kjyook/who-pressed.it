@@ -73,90 +73,102 @@ export async function GET(
 
           if (rowData && rowData.row && rowData.row.length > 0) {
             console.log(`API returned ${rowData.row.length} vote records`);
-            // 의원별 표결 데이터 저장 (배치 처리)
-            const voteRecords = [];
 
-          for (const voteData of rowData.row) {
-            // 의원 정보 먼저 확인/저장
-            const member = await prisma.assemblyMember.upsert({
-              where: { memberId: voteData.MONA_CD },
-              create: {
-                memberId: voteData.MONA_CD,
-                name: voteData.HG_NM,
-                engName: null,
-                party: voteData.POLY_NM,
-                district: voteData.ORIG_NM,
-                committee: null,
-                termNumber: parseInt(voteData.AGE) || 22,
-                reelection: false,
-                profileUrl: null,
-              },
-              update: {
-                name: voteData.HG_NM,
-                party: voteData.POLY_NM,
-                district: voteData.ORIG_NM,
-              },
-            });
+            // ✨ 성능 개선: 병렬 처리 + 트랜잭션으로 속도 향상 및 원자성 보장
+            const BATCH_SIZE = 50;
+            const voteData = rowData.row;
+            const savedVotes: any[] = []; // 저장된 표결 데이터 누적
 
-            // 표결 결과 매핑
-            let voteResult: 'FAVOR' | 'AGAINST' | 'ABSTAIN' | 'ABSENT';
-            const resultStr = voteData.RESULT_VOTE_MOD?.trim();
+            for (let batchStart = 0; batchStart < voteData.length; batchStart += BATCH_SIZE) {
+              const batch = voteData.slice(batchStart, batchStart + BATCH_SIZE);
 
-            if (resultStr === '찬성' || resultStr === '가') {
-              voteResult = 'FAVOR';
-            } else if (resultStr === '반대' || resultStr === '부') {
-              voteResult = 'AGAINST';
-            } else if (resultStr === '기권') {
-              voteResult = 'ABSTAIN';
-            } else {
-              voteResult = 'ABSENT';
-            }
-
-            voteRecords.push({
-              memberId: member.id,
-              billId: bill.id,
-              result: voteResult,
-            });
-          }
-
-          // 배치로 표결 정보 저장
-          for (const voteRecord of voteRecords) {
-            await prisma.vote.upsert({
-              where: {
-                memberId_billId: {
-                  memberId: voteRecord.memberId,
-                  billId: voteRecord.billId,
-                },
-              },
-              create: voteRecord,
-              update: {
-                result: voteRecord.result,
-              },
-            });
-          }
-
-            console.log(`Saved ${rowData.row.length} vote records for bill ${bill.id}`);
-
-            // 표결 정보 다시 조회
-            const updatedBill = await prisma.bill.findUnique({
-              where: { id: parseInt(id) },
-              include: {
-                votes: {
-                  include: {
-                    member: true,
-                  },
-                  orderBy: {
-                    member: {
-                      name: 'asc',
+              const batchVotes = await prisma.$transaction(async (tx) => {
+                // 1. 의원 정보 병렬 저장
+                const memberPromises = batch.map((vote: any) =>
+                  tx.assemblyMember.upsert({
+                    where: { memberId: vote.MONA_CD },
+                    create: {
+                      memberId: vote.MONA_CD,
+                      name: vote.HG_NM,
+                      engName: null,
+                      party: vote.POLY_NM,
+                      district: vote.ORIG_NM,
+                      committee: null,
+                      termNumber: parseInt(vote.AGE) || 22,
+                      reelection: false,
+                      profileUrl: null,
                     },
-                  },
-                },
-              },
-            });
+                    update: {
+                      name: vote.HG_NM,
+                      party: vote.POLY_NM,
+                      district: vote.ORIG_NM,
+                    },
+                  })
+                );
 
-            if (updatedBill) {
-              bill = updatedBill;
+                const members = await Promise.all(memberPromises);
+
+                // 2. 표결 정보 병렬 저장 및 member 데이터와 함께 반환
+                const votePromises = batch.map(async (vote: any, index: number) => {
+                  // 표결 결과 매핑
+                  const voteResultMap: Record<string, 'FAVOR' | 'AGAINST' | 'ABSTAIN' | 'ABSENT'> = {
+                    '찬성': 'FAVOR',
+                    '가': 'FAVOR',
+                    '반대': 'AGAINST',
+                    '부': 'AGAINST',
+                    '기권': 'ABSTAIN',
+                    '불참': 'ABSENT',
+                  };
+
+                  const rawResult = vote.RESULT_VOTE_MOD?.trim();
+                  const voteResult = voteResultMap[rawResult];
+
+                  // ✨ 예상치 못한 표결 결과 값 검증
+                  if (!voteResult) {
+                    console.error(`⚠️ 알 수 없는 표결 결과: "${rawResult}" (안건: ${bill.billName})`);
+                    throw new Error(`Unknown vote result: ${rawResult}`);
+                  }
+
+                  const savedVote = await tx.vote.upsert({
+                    where: {
+                      memberId_billId: {
+                        memberId: members[index].id,
+                        billId: bill.id,
+                      },
+                    },
+                    create: {
+                      memberId: members[index].id,
+                      billId: bill.id,
+                      result: voteResult,
+                    },
+                    update: {
+                      result: voteResult,
+                    },
+                  });
+
+                  // 저장된 표결 정보와 의원 정보를 함께 반환
+                  return {
+                    ...savedVote,
+                    member: members[index],
+                  };
+                });
+
+                return await Promise.all(votePromises);
+              });
+
+              savedVotes.push(...batchVotes);
+
+              // 진행 상황 표시
+              if (voteData.length > BATCH_SIZE) {
+                console.log(`  └─ ${Math.min(batchStart + BATCH_SIZE, voteData.length)}/${voteData.length} 처리됨...`);
+              }
             }
+
+            console.log(`✅ Saved ${voteData.length} vote records for bill ${bill.id}`);
+
+            // ✨ 불필요한 DB 조회 제거: 이미 저장된 데이터를 재사용
+            // 이름순으로 정렬
+            bill.votes = savedVotes.sort((a, b) => a.member.name.localeCompare(b.member.name));
           } else {
             // API가 빈 데이터를 반환
             console.log('API returned no vote records');

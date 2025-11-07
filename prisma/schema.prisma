@@ -37,7 +37,7 @@ model Bill {
   billNumber      String   // 의안번호
   billName        String   // 안건명
   proposer        String?  // 제안자
-  voteDate        DateTime // 표결일
+  voteDate        DateTime? // 표결일 (null 가능)
   sessionNumber   Int?     // 회차
   isPassed        Boolean  // 가결 여부
   favorCount      Int?     // 찬성 수
